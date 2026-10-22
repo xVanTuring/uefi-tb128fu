@@ -16,6 +16,13 @@
 #include <Protocol/FirmwareVolume2.h>
 #include <Protocol/LoadedImage.h>
 
+// UniXNU.efi (package/UniXNUPkg/Application/UniXNU/UniXNU.inf). Registered
+// first so a Mu-only board without the MsBootPolicy/UFP/MassStorage files
+// still has a valid boot option instead of an empty boot order.
+STATIC EFI_GUID gUniXNUApplicationFileGuid = {
+  0x9B665204, 0xA133, 0x47A2, { 0x93, 0x96, 0x9E, 0x2B, 0x37, 0x0A, 0x4E, 0x25 }
+};
+
 EFI_STATUS
 BuildFwLoadOption (
   IN OUT EFI_BOOT_MANAGER_LOAD_OPTION *BootOption,
@@ -243,6 +250,7 @@ MsBootOptionsLibRegisterDefaultBootOptions ()
   UINT8                     BootOptionCount;
 
   // Register Default Boot Options
+  RegisterFvBootOption (&gUniXNUApplicationFileGuid,       L"UniXNU",           (UINTN)0, LOAD_OPTION_ACTIVE, NULL, 0);
   RegisterFvBootOption (&gMsBootPolicyFileGuid,            L"Internal Storage", (UINTN)-1, LOAD_OPTION_ACTIVE, (UINT8 *)"SSD", sizeof ("SSD"));
   RegisterFvBootOption (&gMsBootPolicyFileGuid,            L"USB Storage",      (UINTN)-1, LOAD_OPTION_ACTIVE, (UINT8 *)"USB", sizeof ("USB"));
   RegisterFvBootOption (FixedPcdGetPtr (PcdUfpLoaderFile), L"FFU Mode",         (UINTN)-1, LOAD_OPTION_HIDDEN, NULL, 0);
