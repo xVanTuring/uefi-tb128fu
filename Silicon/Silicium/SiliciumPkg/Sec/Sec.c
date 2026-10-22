@@ -4,6 +4,7 @@
 **/
 
 #include <Library/PcdLib.h>
+#include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/PrePiLib.h>
 #include <Library/DebugAgentLib.h>
@@ -65,9 +66,14 @@ ClearFrameBuffer (VOID)
   LocateMemoryRegionByName ("Display Reserved", &FrameBufferRegion);
   LocateMemoryRegionByName ("Display_Reserved", &FrameBufferRegion);
 
-  // Clear Memory Region
+  // Fill with a recognisable colour instead of black: if the panel is still
+  // scanning out the ABL's cont_splash_region, the screen turns green even
+  // when the text geometry is wrong. White text stays readable.
   if (FrameBufferRegion.Address != 0 && FrameBufferRegion.Length != 0) {
-    ZeroMem ((VOID *)FrameBufferRegion.Address, FrameBufferRegion.Length);
+    volatile UINT32 *Pixel = (volatile UINT32 *)(UINTN)FrameBufferRegion.Address;
+    for (UINTN Index = 0; Index < FrameBufferRegion.Length / sizeof (UINT32); Index++) {
+      Pixel[Index] = 0x0000FF00;
+    }
   }
 }
 
@@ -130,28 +136,33 @@ SecMain (VOID)
 {
   EFI_STATUS Status;
 
-  // Do Platform Specific Initialization
-  PlatformInitialize ();
-
 #ifndef MDEPKG_NDEBUG
-  // Initialize Serial Port
+  // Bring the frame-buffer console up before any platform register access, so
+  // a stall in PlatformInitialize is visible instead of a black screen.
   Status = SerialPortInitialize ();
   if (EFI_ERROR (Status)) {
-    return;
+    CpuDeadLoop ();
   }
 
   // Print Firmware Version
   PrintFirmwareVersion ();
+  DEBUG ((EFI_D_WARN, "SEC: entry FD 0x%lx+0x%lx stack 0x%lx\n",
+          FixedPcdGet64 (PcdFdBaseAddress), FixedPcdGet32 (PcdFdSize),
+          FixedPcdGet64 (PcdCPUCoresStackBase)));
 
   // Initialize Debug Agent
   InitializeDebugAgent (DEBUG_AGENT_INIT_POSTMEM_SEC, NULL, NULL);
   SaveAndSetDebugTimerInterrupt (TRUE);
 #endif
 
+  // Do Platform Specific Initialization
+  PlatformInitialize ();
+
   // Initialize Memory
   Status = InitializeMemory ();
   if (EFI_ERROR (Status)) {
-    return;
+    DEBUG ((EFI_D_ERROR, "SEC: InitializeMemory failed (%r), stopped\n", Status));
+    CpuDeadLoop ();
   }
 
   DEBUG ((EFI_D_WARN, "SEC: memory HOBs done\n"));
@@ -166,7 +177,8 @@ SecMain (VOID)
   Status = PlatformPeim ();
   DEBUG ((EFI_D_WARN, "SEC: platform HOBs done (%r)\n", Status));
   if (EFI_ERROR (Status)) {
-    return;
+    DEBUG ((EFI_D_ERROR, "SEC: PlatformPeim failed (%r), stopped\n", Status));
+    CpuDeadLoop ();
   }
 
   // Pass on what the previous stage handed over in x0 (a DT address for a
@@ -196,7 +208,7 @@ SecMain (VOID)
   DEBUG ((EFI_D_WARN, "SEC: FV decompressed (%r)\n", Status));
   if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "Failed to Decompress FV! Status = %r\n", Status));
-    return;
+    CpuDeadLoop ();
   }
 
   // Load DXE Core
@@ -204,6 +216,7 @@ SecMain (VOID)
   Status = LoadDxeCoreFromFv (NULL, 0);
   if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "Failed to Load DXE Core! Status = %r\n", Status));
+    CpuDeadLoop ();
   }
 }
 
